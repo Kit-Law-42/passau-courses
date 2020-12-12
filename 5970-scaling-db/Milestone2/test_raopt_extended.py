@@ -22,7 +22,8 @@ Tests that selections are broken up correctly.
 class TestRuleBreakUpSelections(unittest.TestCase):
 
     def _check(self, input, expected):
-        computed_expr = raopt.rule_break_up_selections(radb.parse.one_statement_from_string(input))
+        computed_expr = raopt.rule_break_up_selections(
+            radb.parse.one_statement_from_string(input))
         expected_expr = radb.parse.one_statement_from_string(expected)
         self.assertEqual(str(computed_expr), str(expected_expr))
 
@@ -44,9 +45,11 @@ class TestRulePushDownSelections(unittest.TestCase):
         dd = {}
         dd["Person"] = {"name": "string", "age": "integer", "gender": "string"}
         dd["Eats"] = {"name": "string", "pizza": "string"}
-        dd["Serves"] = {"pizzeria": "string", "pizza": "string", "price": "integer"}
+        dd["Serves"] = {"pizzeria": "string",
+                        "pizza": "string", "price": "integer"}
 
-        computed_expr = raopt.rule_push_down_selections(radb.parse.one_statement_from_string(input), dd)
+        computed_expr = raopt.rule_push_down_selections(
+            radb.parse.one_statement_from_string(input), dd)
         expected_expr = radb.parse.one_statement_from_string(expected)
         self.assertEqual(str(computed_expr), str(expected_expr))
 
@@ -67,7 +70,8 @@ Tests that nested selections are properly merged.
 class TestMergeSelections(unittest.TestCase):
 
     def _check(self, input, expected):
-        computed_expr = raopt.rule_merge_selections(radb.parse.one_statement_from_string(input))
+        computed_expr = raopt.rule_merge_selections(
+            radb.parse.one_statement_from_string(input))
         expected_expr = radb.parse.one_statement_from_string(expected)
         self.assertEqual(str(computed_expr), str(expected_expr))
 
@@ -98,7 +102,8 @@ Assumes that all selections have been pushed down as far as possible.
 class TestIntroduceJoins(unittest.TestCase):
 
     def _check(self, input, expected):
-        computed_expr = raopt.rule_introduce_joins(radb.parse.one_statement_from_string(input))
+        computed_expr = raopt.rule_introduce_joins(
+            radb.parse.one_statement_from_string(input))
         expected_expr = radb.parse.one_statement_from_string(expected)
         self.assertEqual(str(computed_expr), str(expected_expr))
 
@@ -125,7 +130,8 @@ class TestAllSteps(unittest.TestCase):
         dd = {}
         dd["Person"] = {"name": "string", "age": "integer", "gender": "string"}
         dd["Eats"] = {"name": "string", "pizza": "string"}
-        dd["Serves"] = {"pizzeria": "string", "pizza": "string", "price": "integer"}
+        dd["Serves"] = {"pizzeria": "string",
+                        "pizza": "string", "price": "integer"}
 
         ra0 = radb.parse.one_statement_from_string(input)
         ra1 = raopt.rule_break_up_selections(ra0)
@@ -148,7 +154,8 @@ class TestAllSteps(unittest.TestCase):
             "\project_{P.name} ((\select_{P.age = 16} \\rename_{P: *} Person) \join_{P.name = E.name} (\select_{E.pizza = 'mushroom'} \\rename_{E: *} Eats));")
 
     def test_extend_3(self):
-        self._check("\\rename_{P: *} Person \cross Eats;", "\\rename_{P: *} Person \cross Eats;")
+        self._check("\\rename_{P: *} Person \cross Eats;",
+                    "\\rename_{P: *} Person \cross Eats;")
 
     def test_extend_4(self):
         self._check("\select_{Person.gender='f' and Person.age=16}(Person \cross Eats);",
@@ -158,7 +165,8 @@ class TestAllSteps(unittest.TestCase):
         self._check("Person;", "Person;")
 
     def test_extend_6(self):
-        self._check("(Person \cross Eats) \cross Serves;", "(Person \cross Eats) \cross Serves;")
+        self._check("(Person \cross Eats) \cross Serves;",
+                    "(Person \cross Eats) \cross Serves;")
 
     def test_extend_7(self):
         self._check("""\project_{Person.name, pizzeria}(\select_{Person.name = Eats.name
