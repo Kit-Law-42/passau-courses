@@ -1,5 +1,5 @@
 # Passau-courses
-This repository provides a storage and reference for all University of Passau coursework/projects involved in 2020-2021.
+This repository act as storage and reference for all University of Passau coursework/projects involved in 2020-2021.
 
 ## CourseList
 3 courses with coding exercises are involved by now. They are:
