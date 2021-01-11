@@ -1,8 +1,9 @@
 import radb.ast
-from radb.ast import RelExpr
+from radb.ast import RANumber, RelExpr
 import radb.parse
 import radb
 from radb.parse import RAParser as sym
+import sqlparse
 
 
 def translate(stmt):
@@ -96,9 +97,39 @@ def translate(stmt):
             # convert BinaryOperator = index
             biIndex = sym.literalNames.index(
                 "'" + whereSingleClause[1].value + "'")
+            # split both clause in whereSingleClause[0].value and whereSingleClause[2].value by the dot.
+            tableName0, colName0, tableName2, colName2 = ["" for _ in range(4)]
+            if whereSingleClause[0].value.find('.') != -1:
+                tableName0 = whereSingleClause[0].value.split('.')[0]
+                colName0 = whereSingleClause[0].value.split('.')[1]
+            else:
+                tableName0 = None
+                colName0 = whereSingleClause[0].value
+            if whereSingleClause[2].value.find('.') != -1:
+                tableName2 = whereSingleClause[2].value.split('.')[0]
+                colName2 = whereSingleClause[2].value.split('.')[1]
+            else:
+                tableName2 = None
+                colName2 = whereSingleClause[2].value
             # use ValExprBinaryOp
+            obj1, obj2 = ["" for _ in range(2)]
+            if ((isinstance(whereSingleClause[0], sqlparse.sql.Identifier) and whereSingleClause[2].ttype is not None)) or ((isinstance(whereSingleClause[2], sqlparse.sql.Identifier) and whereSingleClause[0].ttype is not None)):
+                obj1 = radb.ast.AttrRef(tableName0, colName0)
+                if (whereSingleClause[2].ttype is not None):
+                    if (whereSingleClause[2].value.startswith("'")):
+                        obj2 = radb.ast.RAString(colName2)
+                    else:
+                        obj2 = radb.ast.RANumber(colName2)
+                elif(whereSingleClause[0].ttype is not None):
+                    if (whereSingleClause[0].value.startswith("'")):
+                        obj2 = radb.ast.RAString(colName2)
+                    else:
+                        obj2 = radb.ast.RANumber(colName2)
+            elif ((isinstance(whereSingleClause[0], sqlparse.sql.Identifier) and isinstance(whereSingleClause[2], sqlparse.sql.Identifier)) or (isinstance(whereSingleClause[2], sqlparse.sql.Identifier) and isinstance(whereSingleClause[0], sqlparse.sql.Identifier))):
+                obj1 = radb.ast.AttrRef(tableName0, colName0)
+                obj2 = radb.ast.AttrRef(tableName2, colName2)
             BinaryOp = radb.ast.ValExprBinaryOp(
-                radb.ast.AttrRef(None, whereSingleClause[0].value), biIndex, radb.ast.AttrRef(None, whereSingleClause[2].value))
+                obj1, biIndex, obj2)
             whereClauses = radb.ast.Select(BinaryOp, tablesName)
         else:
             # delete blank tokens in wherelist
@@ -111,9 +142,39 @@ def translate(stmt):
             # convert BinaryOperator = index
             biIndex = sym.literalNames.index(
                 "'" + whereSingleClause[1].value + "'")
+            # split both clause in whereSingleClause[0].value and whereSingleClause[2].value by the dot.
+            tableName0, colName0, tableName2, colName2 = ["" for _ in range(4)]
+            if whereSingleClause[0].value.find('.') != -1:
+                tableName0 = whereSingleClause[0].value.split('.')[0]
+                colName0 = whereSingleClause[0].value.split('.')[1]
+            else:
+                tableName0 = None
+                colName0 = whereSingleClause[0].value
+            if whereSingleClause[2].value.find('.') != -1:
+                tableName2 = whereSingleClause[2].value.split('.')[0]
+                colName2 = whereSingleClause[2].value.split('.')[1]
+            else:
+                tableName2 = None
+                colName2 = whereSingleClause[2].value
             # use ValExprBinaryOp
+            obj1, obj2 = ["" for _ in range(2)]
+            if ((isinstance(whereSingleClause[0], sqlparse.sql.Identifier) and whereSingleClause[2].ttype is not None)) or ((isinstance(whereSingleClause[2], sqlparse.sql.Identifier) and whereSingleClause[0].ttype is not None)):
+                obj1 = radb.ast.AttrRef(tableName0, colName0)
+                if (whereSingleClause[2].ttype is not None):
+                    if (whereSingleClause[2].value.startswith("'")):
+                        obj2 = radb.ast.RAString(colName2)
+                    else:
+                        obj2 = radb.ast.RANumber(colName2)
+                elif(whereSingleClause[0].ttype is not None):
+                    if (whereSingleClause[0].value.startswith("'")):
+                        obj2 = radb.ast.RAString(colName2)
+                    else:
+                        obj2 = radb.ast.RANumber(colName2)
+            elif ((isinstance(whereSingleClause[0], sqlparse.sql.Identifier) and isinstance(whereSingleClause[2], sqlparse.sql.Identifier)) or (isinstance(whereSingleClause[2], sqlparse.sql.Identifier) and isinstance(whereSingleClause[0], sqlparse.sql.Identifier))):
+                obj1 = radb.ast.AttrRef(tableName0, colName0)
+                obj2 = radb.ast.AttrRef(tableName2, colName2)
             BinaryOp = radb.ast.ValExprBinaryOp(
-                radb.ast.AttrRef(None, whereSingleClause[0].value), biIndex, radb.ast.AttrRef(None, whereSingleClause[2].value))
+                obj1, biIndex, obj2)
 
             # 2. get a pair of token  (2nd & 3rd, 4th & 5th etc.)
             # 2nd token will be binary operator.
@@ -126,9 +187,41 @@ def translate(stmt):
                     x for x in secondClause.tokens if x.value != ' ']
                 biIndex = sym.literalNames.index(
                     "'" + whereSingleClause[1].value + "'")
+
+                # split both clause in whereSingleClause[0].value and whereSingleClause[2].value by the dot.
+                tableName0, colName0, tableName2, colName2 = [
+                    "" for _ in range(4)]
+                if whereSingleClause[0].value.find('.') != -1:
+                    tableName0 = whereSingleClause[0].value.split('.')[0]
+                    colName0 = whereSingleClause[0].value.split('.')[1]
+                else:
+                    tableName0 = None
+                    colName0 = whereSingleClause[0].value
+                if whereSingleClause[2].value.find('.') != -1:
+                    tableName2 = whereSingleClause[2].value.split('.')[0]
+                    colName2 = whereSingleClause[2].value.split('.')[1]
+                else:
+                    tableName2 = None
+                    colName2 = whereSingleClause[2].value
                 # use ValExprBinaryOp
+                obj1, obj2 = ["" for _ in range(2)]
+                if ((isinstance(whereSingleClause[0], sqlparse.sql.Identifier) and whereSingleClause[2].ttype is not None)) or ((isinstance(whereSingleClause[2], sqlparse.sql.Identifier) and whereSingleClause[0].ttype is not None)):
+                    obj1 = radb.ast.AttrRef(tableName0, colName0)
+                    if (whereSingleClause[2].ttype is not None):
+                        if (whereSingleClause[2].value.startswith("'")):
+                            obj2 = radb.ast.RAString(colName2)
+                        else:
+                            obj2 = radb.ast.RANumber(colName2)
+                    elif(whereSingleClause[0].ttype is not None):
+                        if (whereSingleClause[0].value.startswith("'")):
+                            obj2 = radb.ast.RAString(colName2)
+                        else:
+                            obj2 = radb.ast.RANumber(colName2)
+                elif ((isinstance(whereSingleClause[0], sqlparse.sql.Identifier) and isinstance(whereSingleClause[2], sqlparse.sql.Identifier)) or (isinstance(whereSingleClause[2], sqlparse.sql.Identifier) and isinstance(whereSingleClause[0], sqlparse.sql.Identifier))):
+                    obj1 = radb.ast.AttrRef(tableName0, colName0)
+                    obj2 = radb.ast.AttrRef(tableName2, colName2)
                 nextBinaryOp = radb.ast.ValExprBinaryOp(
-                    radb.ast.AttrRef(None, whereSingleClause[0].value), biIndex, radb.ast.AttrRef(None, whereSingleClause[2].value))
+                    obj1, biIndex, obj2)
 
                 # conjunct 2 where clause.
                 BinaryOp = radb.ast.ValExprBinaryOp(

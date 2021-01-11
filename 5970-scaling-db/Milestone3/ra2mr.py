@@ -148,7 +148,29 @@ class JoinTask(RelAlgQueryTask):
 
         ''' ...................... fill in your code below ........................'''
 
-        yield ("foo", "bar")
+        listCondition = []
+        # add itself to list if only 1 equal condition
+        if (isinstance(condition, radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[0], radb.ast.AttrRef)):
+            listCondition.append(condition)
+        else:
+            # add whole list of >1 equal condition.
+            for cond in condition.inputs:
+                listCondition.append(cond)
+
+        attr = ""
+        listKey = []
+        for cond in listCondition:
+            # join keys only exist in one of the table, determine this row is in tableA or tableB
+            if cond.inputs[0].rel == relation or cond.inputs[0].rel in relation:
+                relation = cond.inputs[0].rel
+                attr = cond.inputs[0].name
+            elif cond.inputs[1].rel == relation or cond.inputs[1].rel in relation:
+                relation = cond.inputs[1].rel
+                attr = cond.inputs[1].name
+            listKey.append(str(json_tuple[relation + "." + attr]))
+
+        key = ','.join(listKey)
+        yield (key, tuple)
 
         ''' ...................... fill in your code above ........................'''
 
@@ -156,8 +178,42 @@ class JoinTask(RelAlgQueryTask):
         raquery = radb.parse.one_statement_from_string(self.querystring)
 
         ''' ...................... fill in your code below ........................'''
+        # the key already store 2 common key, so no need to find key here.
+        condition = raquery.cond
 
-        yield ("foo", "bar")
+        # take one of the key to be the identifier, it does not affect the corrcetness of the algo.
+        if not (isinstance(condition, radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[0], radb.ast.AttrRef)):
+            condition = condition.inputs[1]
+
+        list_of_values = list(values)
+        if (len(list_of_values)) > 1:
+            JoinClause1 = condition.inputs[0].rel + \
+                "." + condition.inputs[0].name
+            JoinClause2 = condition.inputs[1].rel + \
+                "." + condition.inputs[1].name
+            rowsFromTable1 = []
+            rowsFromTable2 = []
+            # divide lines into 2 list, by their origin table.
+            for jsonVal in list_of_values:
+                if (JoinClause1 in jsonVal):
+                    rowsFromTable1.append(jsonVal)
+                elif (JoinClause2 in jsonVal):
+                    rowsFromTable2.append(jsonVal)
+            # if matched rows = 0, do not process.
+            if len(rowsFromTable1) > 0 and len(rowsFromTable2) > 0:
+                for row2 in rowsFromTable2:
+                    rowsMergedTable = {}
+                    jsonRow = json.loads(row2)
+                    # add all entries from json 2 to merged json
+                    for rowkey in jsonRow:
+                        rowsMergedTable[rowkey] = jsonRow[rowkey]
+                    for row1 in rowsFromTable1:
+                        jsonRow = json.loads(row1)
+                        # add all entries from json 1 to merged json
+                        for rowkey in jsonRow:
+                            rowsMergedTable[rowkey] = jsonRow[rowkey]
+                        jsonString_merged = json.dumps(rowsMergedTable)
+                        yield (condition.inputs[0].rel + "_" + condition.inputs[1].rel, jsonString_merged)
 
         ''' ...................... fill in your code above ........................'''
 
@@ -177,8 +233,53 @@ class SelectTask(RelAlgQueryTask):
         condition = radb.parse.one_statement_from_string(self.querystring).cond
 
         ''' ...................... fill in your code below ........................'''
+        attr = ""
+        value = ""
 
-        yield ("foo", "bar")
+        # multiple select clause
+        if isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
+
+            selectObj = condition.inputs
+            selectList = []
+            while (isinstance(selectObj[0], radb.ast.ValExprBinaryOp)):
+                selectList.append(selectObj[1])
+                selectObj = selectObj[0].inputs
+
+            selectList.append(radb.ast.ValExprBinaryOp(
+                selectObj[0], radb.parse.RAParser.EQ, selectObj[1]))
+            allValid = True
+            if selectList:
+                while selectList:
+                    condition = selectList.pop()
+                    if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                        attr = condition.inputs[0].name
+                        value = condition.inputs[1]
+                    else:
+                        attr = condition.inputs[1].name
+                        value = condition.inputs[0]
+                    if isinstance(value, radb.ast.RAString):
+                        value = str(value).strip('\'')
+                    else:
+                        value = int(value.val)
+                    if json_tuple[relation + "." + attr] != value:
+                        allValid = False
+                        break
+                if allValid == True:
+                    yield (relation, tuple)
+        # only 1 select clause.
+        else:
+            if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                attr = condition.inputs[0].name
+                value = condition.inputs[1]
+            else:
+                attr = condition.inputs[1].name
+                value = condition.inputs[0]
+            if isinstance(value, radb.ast.RAString):
+                value = str(value).strip('\'')
+            else:
+                value = int(value.val)
+            if json_tuple[relation + "." + attr] == value:
+                yield (relation, tuple)
 
         ''' ...................... fill in your code above ........................'''
 
@@ -198,8 +299,11 @@ class RenameTask(RelAlgQueryTask):
         raquery = radb.parse.one_statement_from_string(self.querystring)
 
         ''' ...................... fill in your code below ........................'''
-
-        yield ("foo", "bar")
+        newTableName = raquery.relname
+        oldTableName = raquery.inputs[0].rel
+        tuple = tuple.replace(oldTableName, newTableName)
+        relation = relation.replace(oldTableName, newTableName)
+        yield (relation, tuple)
 
         ''' ...................... fill in your code above ........................'''
 
@@ -219,15 +323,25 @@ class ProjectTask(RelAlgQueryTask):
         attrs = radb.parse.one_statement_from_string(self.querystring).attrs
 
         ''' ...................... fill in your code below ........................'''
+        output_json_tuple = {}
+        for attr in attrs:
+            attrname = attr.name
+            if attr.rel != None:
+                relation = attr.rel
+            output_json_tuple[relation + "." +
+                              attrname] = json_tuple[relation + "." + attrname]
 
-        yield ("foo", "bar")
+        output_json_data = json.dumps(output_json_tuple)
+        yield (relation, output_json_data)
 
         ''' ...................... fill in your code above ........................'''
 
     def reducer(self, key, values):
         ''' ...................... fill in your code below ........................'''
-
-        yield ("foo", "bar")
+        set_of_values = set(values)
+        sorted_list = sorted(set_of_values)
+        for element in sorted_list:
+            yield (key, element)
 
         ''' ...................... fill in your code above ........................'''
 

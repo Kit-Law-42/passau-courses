@@ -106,6 +106,7 @@ def rule_push_down_selections(ra1, dd, selectClauses=None):
         if selectClauses is not None:
             for selectClause in reversed(selectClauses):
                 # if select clause rel is Empty (no table specified)
+                # in ms1 the parsing is not accurate.
                 if (isinstance(selectClause.inputs[0], radb.ast.AttrRef) and isinstance(selectClause.inputs[1], radb.ast.AttrRef)):
                     # if both table name in select clause appear in sub-list
                     if ((selectClause.inputs[0].rel in firstCrossTableList and selectClause.inputs[1].rel in secondCrossTableList)):
@@ -125,9 +126,13 @@ def rule_push_down_selections(ra1, dd, selectClauses=None):
             # loop over each clause of listofClauses
             if selectClauses is not None:
                 for selectClause in reversed(selectClauses):
+                    # the latter one is the value
+                    #if selectClause.inputs[0].name == key:
                     if isinstance(selectClause.inputs[1], radb.ast.Literal):
                         if (selectClause.inputs[0].rel is None and selectClause.inputs[0].name == key) or (selectClause.inputs[0].rel == tableName and selectClause.inputs[0].name == key):
                             result = radb.ast.Select(selectClause, result)
+                    # the former one is the value
+                    # elif selectClause.inputs[1].name == key:
                     elif isinstance(selectClause.inputs[0], radb.ast.Literal):
                         if (selectClause.inputs[1].rel is None and selectClause.inputs[1].name == key) or (selectClause.inputs[1].rel == tableName and selectClause.inputs[1].name == key):
                             result = radb.ast.Select(selectClause, result)
@@ -144,9 +149,11 @@ def rule_push_down_selections(ra1, dd, selectClauses=None):
             # loop over each clause of listofClauses
             if selectClauses is not None:
                 for selectClause in reversed(selectClauses):
+                    #if selectClause.inputs[0].name == key:
                     if isinstance(selectClause.inputs[1], radb.ast.Literal):
                         if (selectClause.inputs[0].rel is None and selectClause.inputs[0].name == key) or (selectClause.inputs[0].rel == renameTableName and selectClause.inputs[0].name == key):
                             result = radb.ast.Select(selectClause, result)
+                    #elif selectClause.inputs[1].name == key:
                     elif isinstance(selectClause.inputs[0], radb.ast.Literal):
                         if (selectClause.inputs[1].rel is None and selectClause.inputs[1].name == key) or (selectClause.inputs[1].rel == renameTableName and selectClause.inputs[1].name == key):
                             result = radb.ast.Select(selectClause, result)
