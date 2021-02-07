@@ -117,7 +117,7 @@ data where they are.
 '''
 
 
-def task_factory(raquery, optimize, step=1, env=ExecEnv.HDFS):
+def task_factory(raquery, optimize=False, step=1, env=ExecEnv.HDFS):
     assert (isinstance(raquery, radb.ast.Node))
 
     if isinstance(raquery, radb.ast.Select):  # Only mapper exists
@@ -125,7 +125,7 @@ def task_factory(raquery, optimize, step=1, env=ExecEnv.HDFS):
 
     elif isinstance(raquery, radb.ast.RelRef):
         filename = raquery.rel + ".json"
-        return InputData(filename=filename, exec_environment=env, optimize=optimize)
+        return InputData(filename=filename, exec_environment=env)
 
     elif isinstance(raquery, radb.ast.Join):
         return JoinTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
