@@ -52,7 +52,12 @@ Counts the number of steps / luigi tasks that we need for evaluating this query.
 def count_steps(raquery):
     assert (isinstance(raquery, radb.ast.Node))
 
-    if (isinstance(raquery, radb.ast.Select) or isinstance(raquery, radb.ast.Project) or
+    if (isinstance(raquery, radb.ast.Project) and isinstance(raquery.inputs[0], radb.ast.Select) and isinstance(raquery.inputs[0].inputs[0], radb.ast.Select)):
+        return 3 + count_steps(raquery.inputs[0].inputs[0].inputs[0])
+
+    elif (isinstance(raquery, radb.ast.Project) and isinstance(raquery.inputs[0], radb.ast.Select)):
+        return 2 + count_steps(raquery.inputs[0].inputs[0])
+    elif (isinstance(raquery, radb.ast.Select) or isinstance(raquery, radb.ast.Project) or
             isinstance(raquery, radb.ast.Rename)):
         return 1 + count_steps(raquery.inputs[0])
 
@@ -120,7 +125,12 @@ data where they are.
 def task_factory(raquery, optimize=False, step=1, env=ExecEnv.HDFS):
     assert (isinstance(raquery, radb.ast.Node))
 
-    if isinstance(raquery, radb.ast.Select):  # Only mapper exists
+    if (isinstance(raquery, radb.ast.Project) and optimize and isinstance(raquery.inputs[0], radb.ast.Select) and isinstance(raquery.inputs[0].inputs[0], radb.ast.Rename)):
+        # do something
+        return ProjectSelectRenameTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
+    elif (isinstance(raquery, radb.ast.Project) and isinstance(raquery.inputs[0], radb.ast.Select) and optimize):
+        return ProjectSelectTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
+    elif isinstance(raquery, radb.ast.Select):  # Only mapper exists
         return SelectTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
 
     elif isinstance(raquery, radb.ast.RelRef):
@@ -351,6 +361,227 @@ class ProjectTask(RelAlgQueryTask):
         yield (relation, output_json_data)
 
         ''' ...................... fill in your code above ........................'''
+
+    def reducer(self, key, values):
+        ''' ...................... fill in your code below ........................'''
+        set_of_values = set(values)
+        sorted_list = sorted(set_of_values)
+        for element in sorted_list:
+            yield (key, element)
+
+        ''' ...................... fill in your code above ........................'''
+
+
+class ProjectSelectTask(RelAlgQueryTask):
+    def requires(self):
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+        assert (isinstance(raquery, radb.ast.Project))
+        assert (isinstance(raquery.inputs[0], radb.ast.Select))
+
+        return [task_factory(raquery.inputs[0].inputs[0], step=self.step + 2, env=self.exec_environment, optimize=self.optimize)]
+
+    def mapper(self, line):
+        '''-----------------------------Select Task Start-----------------------------'''
+        relation, tuple = line.split('\t')
+        json_tuple = json.loads(tuple)
+
+        condition = radb.parse.one_statement_from_string(
+            self.querystring).inputs[0].cond
+        resultList = []
+        ''' ...................... fill in your code below ........................'''
+        attr = ""
+        value = ""
+
+        # multiple select clause
+        if isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
+
+            selectObj = condition.inputs
+            selectList = []
+            while (isinstance(selectObj[0], radb.ast.ValExprBinaryOp)):
+                selectList.append(selectObj[1])
+                selectObj = selectObj[0].inputs
+
+            selectList.append(radb.ast.ValExprBinaryOp(
+                selectObj[0], radb.parse.RAParser.EQ, selectObj[1]))
+            allValid = True
+            if selectList:
+                while selectList:
+                    condition = selectList.pop()
+                    if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                        attr = condition.inputs[0].name
+                        value = condition.inputs[1]
+                    else:
+                        attr = condition.inputs[1].name
+                        value = condition.inputs[0]
+                    if isinstance(value, radb.ast.RAString):
+                        value = str(value).strip('\'')
+                    else:
+                        value = int(value.val)
+                    if json_tuple[relation + "." + attr] != value:
+                        allValid = False
+                        break
+                if allValid == True:
+                    # yield (relation, tuple)
+                    resultList.append((relation, tuple))
+        # only 1 select clause.
+        else:
+            if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                attr = condition.inputs[0].name
+                value = condition.inputs[1]
+            else:
+                attr = condition.inputs[1].name
+                value = condition.inputs[0]
+            if isinstance(value, radb.ast.RAString):
+                value = str(value).strip('\'')
+            else:
+                value = int(value.val)
+            if json_tuple[relation + "." + attr] == value:
+                # yield (relation, tuple)
+                resultList.append((relation, tuple))
+
+        ''' ...................... fill in your code above ........................'''
+        '''-----------------------------Select Task End-----------------------------'''
+        '''-----------------------------Project Task Start-------------------------------'''
+        for result in resultList:
+            #relation, tuple = line.split('\t')
+            relation, tuple = result
+            json_tuple = json.loads(tuple)
+
+            attrs = radb.parse.one_statement_from_string(
+                self.querystring).attrs
+
+            ''' ...................... fill in your code below ........................'''
+            output_json_tuple = {}
+            for attr in attrs:
+                attrname = attr.name
+                if attr.rel != None:
+                    relation = attr.rel
+                output_json_tuple[relation + "." +
+                                  attrname] = json_tuple[relation + "." + attrname]
+
+            output_json_data = json.dumps(output_json_tuple)
+            yield (relation, output_json_data)
+
+        ''' ...................... fill in your code above ........................'''
+        '''-----------------------------Project Task End-------------------------------'''
+
+    def reducer(self, key, values):
+        ''' ...................... fill in your code below ........................'''
+        set_of_values = set(values)
+        sorted_list = sorted(set_of_values)
+        for element in sorted_list:
+            yield (key, element)
+
+        ''' ...................... fill in your code above ........................'''
+
+
+class ProjectSelectRenameTask(RelAlgQueryTask):
+    def requires(self):
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+        assert (isinstance(raquery, radb.ast.Project))
+        assert (isinstance(raquery.inputs[0], radb.ast.Select))
+        assert (isinstance(raquery.inputs[0].inputs[0], radb.ast.Rename))
+        return [task_factory(raquery.inputs[0].inputs[0].inputs[0], step=self.step + 3, env=self.exec_environment, optimize=self.optimize)]
+
+    def mapper(self, line):
+        '''-----------------------------Rename Task Start-----------------------------'''
+        relation, tuple = line.split('\t')
+        json_tuple = json.loads(tuple)
+
+        raquery = radb.parse.one_statement_from_string(
+            self.querystring).inputs[0].inputs[0]
+
+        ''' ...................... fill in your code below ........................'''
+        newTableName = raquery.relname
+        oldTableName = raquery.inputs[0].rel
+        tuple = tuple.replace(oldTableName, newTableName)
+        relation = relation.replace(oldTableName, newTableName)
+        # yield (relation, tuple)
+        resulttuple = (relation, tuple)
+        '''-----------------------------Rename Task End-------------------------------'''
+        '''-----------------------------Select Task Start-----------------------------'''
+        relation, tuple = resulttuple
+        json_tuple = json.loads(tuple)
+
+        condition = radb.parse.one_statement_from_string(
+            self.querystring).inputs[0].cond
+        resultList = []
+        ''' ...................... fill in your code below ........................'''
+        attr = ""
+        value = ""
+
+        # multiple select clause
+        if isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
+
+            selectObj = condition.inputs
+            selectList = []
+            while (isinstance(selectObj[0], radb.ast.ValExprBinaryOp)):
+                selectList.append(selectObj[1])
+                selectObj = selectObj[0].inputs
+
+            selectList.append(radb.ast.ValExprBinaryOp(
+                selectObj[0], radb.parse.RAParser.EQ, selectObj[1]))
+            allValid = True
+            if selectList:
+                while selectList:
+                    condition = selectList.pop()
+                    if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                        attr = condition.inputs[0].name
+                        value = condition.inputs[1]
+                    else:
+                        attr = condition.inputs[1].name
+                        value = condition.inputs[0]
+                    if isinstance(value, radb.ast.RAString):
+                        value = str(value).strip('\'')
+                    else:
+                        value = int(value.val)
+                    if json_tuple[relation + "." + attr] != value:
+                        allValid = False
+                        break
+                if allValid == True:
+                    # yield (relation, tuple)
+                    resultList.append((relation, tuple))
+        # only 1 select clause.
+        else:
+            if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                attr = condition.inputs[0].name
+                value = condition.inputs[1]
+            else:
+                attr = condition.inputs[1].name
+                value = condition.inputs[0]
+            if isinstance(value, radb.ast.RAString):
+                value = str(value).strip('\'')
+            else:
+                value = int(value.val)
+            if json_tuple[relation + "." + attr] == value:
+                # yield (relation, tuple)
+                resultList.append((relation, tuple))
+
+        ''' ...................... fill in your code above ........................'''
+        '''-----------------------------Select Task End-----------------------------'''
+        '''-----------------------------Project Task Start-------------------------------'''
+        for result in resultList:
+            #relation, tuple = line.split('\t')
+            relation, tuple = result
+            json_tuple = json.loads(tuple)
+
+            attrs = radb.parse.one_statement_from_string(
+                self.querystring).attrs
+
+            ''' ...................... fill in your code below ........................'''
+            output_json_tuple = {}
+            for attr in attrs:
+                attrname = attr.name
+                if attr.rel != None:
+                    relation = attr.rel
+                output_json_tuple[relation + "." +
+                                  attrname] = json_tuple[relation + "." + attrname]
+
+            output_json_data = json.dumps(output_json_tuple)
+            yield (relation, output_json_data)
+
+        ''' ...................... fill in your code above ........................'''
+        '''-----------------------------Project Task End-------------------------------'''
 
     def reducer(self, key, values):
         ''' ...................... fill in your code below ........................'''
