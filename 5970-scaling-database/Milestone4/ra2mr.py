@@ -53,10 +53,12 @@ def count_steps(raquery):
     assert (isinstance(raquery, radb.ast.Node))
 
     if (isinstance(raquery, radb.ast.Project) and isinstance(raquery.inputs[0], radb.ast.Select) and isinstance(raquery.inputs[0].inputs[0], radb.ast.Select)):
-        return 3 + count_steps(raquery.inputs[0].inputs[0].inputs[0])
+        return 1 + count_steps(raquery.inputs[0].inputs[0].inputs[0])
 
     elif (isinstance(raquery, radb.ast.Project) and isinstance(raquery.inputs[0], radb.ast.Select)):
-        return 2 + count_steps(raquery.inputs[0].inputs[0])
+        return 1 + count_steps(raquery.inputs[0].inputs[0])
+    elif (isinstance(raquery, radb.ast.Join) and isinstance(raquery.inputs[1], radb.ast.Select)) or (isinstance(raquery, radb.ast.Join) and isinstance(raquery.inputs[0], radb.ast.Select)):
+        return 1 + count_steps(raquery.inputs[0]) + count_steps(raquery.inputs[1])
     elif (isinstance(raquery, radb.ast.Select) or isinstance(raquery, radb.ast.Project) or
             isinstance(raquery, radb.ast.Rename)):
         return 1 + count_steps(raquery.inputs[0])
@@ -130,6 +132,14 @@ def task_factory(raquery, optimize=False, step=1, env=ExecEnv.HDFS):
         return ProjectSelectRenameTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
     elif (isinstance(raquery, radb.ast.Project) and isinstance(raquery.inputs[0], radb.ast.Select) and optimize):
         return ProjectSelectTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
+    elif (isinstance(raquery, radb.ast.Join) and isinstance(raquery.inputs[1], radb.ast.Select) and isinstance(raquery.inputs[0], radb.ast.Select) and optimize):
+        return JoinBothSelectTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
+    elif (isinstance(raquery, radb.ast.Join) and isinstance(raquery.inputs[1], radb.ast.Select) and optimize):
+        return JoinRightSelectTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
+    elif (isinstance(raquery, radb.ast.Join) and isinstance(raquery.inputs[0], radb.ast.Select) and optimize):
+        return JoinLeftSelectTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
+    #-----------Above are chain folding tasks----------#
+    #-----------Below are default tasks----------#
     elif isinstance(raquery, radb.ast.Select):  # Only mapper exists
         return SelectTask(querystring=str(raquery) + ";", step=step, exec_environment=env, optimize=optimize)
 
@@ -589,6 +599,532 @@ class ProjectSelectRenameTask(RelAlgQueryTask):
         sorted_list = sorted(set_of_values)
         for element in sorted_list:
             yield (key, element)
+
+        ''' ...................... fill in your code above ........................'''
+
+
+class JoinRightSelectTask(RelAlgQueryTask):
+    def requires(self):
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+        assert (isinstance(raquery, radb.ast.Join))
+        assert (isinstance(raquery.inputs[1], radb.ast.Select))
+        task1 = task_factory(
+            raquery.inputs[0], step=self.step + 1, env=self.exec_environment, optimize=self.optimize)
+        task2 = task_factory(raquery.inputs[1].inputs[0], step=self.step + count_steps(raquery.inputs[0]) + 1,
+                             env=self.exec_environment, optimize=self.optimize)
+
+        return [task1, task2]
+
+    def mapper(self, line):
+        '''-----------------------------Select Task Start-------------------------------'''
+        relation, tuple = line.split('\t')
+        json_tuple = json.loads(tuple)
+
+        condition = radb.parse.one_statement_from_string(
+            self.querystring).inputs[1].cond
+        resultList = []
+        # left table name: radb.parse.one_statement_from_string(self.querystring).cond.inputs[0].rel
+        rightTblName = radb.parse.one_statement_from_string(
+            self.querystring).cond.inputs[1].rel
+        ''' ...................... fill in your code below ........................'''
+        attr = ""
+        value = ""
+        # multiple select clause
+        if (relation == rightTblName):
+            if isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
+
+                selectObj = condition.inputs
+                selectList = []
+                while (isinstance(selectObj[0], radb.ast.ValExprBinaryOp)):
+                    selectList.append(selectObj[1])
+                    selectObj = selectObj[0].inputs
+
+                selectList.append(radb.ast.ValExprBinaryOp(
+                    selectObj[0], radb.parse.RAParser.EQ, selectObj[1]))
+                allValid = True
+                if selectList:
+                    while selectList:
+                        condition = selectList.pop()
+                        if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                            attr = condition.inputs[0].name
+                            value = condition.inputs[1]
+                        else:
+                            attr = condition.inputs[1].name
+                            value = condition.inputs[0]
+                        if isinstance(value, radb.ast.RAString):
+                            value = str(value).strip('\'')
+                        else:
+                            value = int(value.val)
+                        if json_tuple[relation + "." + attr] != value:
+                            allValid = False
+                            break
+                    if allValid == True:
+                        # yield (relation, tuple)
+                        resultList.append((relation, tuple))
+        # only 1 select clause.
+            else:
+                if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                    attr = condition.inputs[0].name
+                    value = condition.inputs[1]
+                else:
+                    attr = condition.inputs[1].name
+                    value = condition.inputs[0]
+                if isinstance(value, radb.ast.RAString):
+                    value = str(value).strip('\'')
+                else:
+                    value = int(value.val)
+                if json_tuple[relation + "." + attr] == value:
+                    # yield (relation, tuple)
+                    resultList.append((relation, tuple))
+        else:
+            resultList.append((relation, tuple))
+
+        ''' ...................... fill in your code above ........................'''
+
+        '''-----------------------------Select Task End-------------------------------'''
+        '''-----------------------------Join Task Start-------------------------------'''
+        for result in resultList:
+            relation, tuple = result
+            json_tuple = json.loads(tuple)
+
+            raquery = radb.parse.one_statement_from_string(self.querystring)
+            condition = raquery.cond
+
+            ''' ...................... fill in your code below ........................'''
+
+            listCondition = []
+            # add itself to list if only 1 equal condition
+            if (isinstance(condition, radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[0], radb.ast.AttrRef)):
+                listCondition.append(condition)
+            else:
+                # add whole list of >1 equal condition.
+                for cond in condition.inputs:
+                    listCondition.append(cond)
+
+            attr = ""
+            listKey = []
+            for cond in listCondition:
+                # join keys only exist in one of the table, determine this row is in tableA or tableB
+                if cond.inputs[0].rel == relation or cond.inputs[0].rel in relation:
+                    relation = cond.inputs[0].rel
+                    attr = cond.inputs[0].name
+                elif cond.inputs[1].rel == relation or cond.inputs[1].rel in relation:
+                    relation = cond.inputs[1].rel
+                    attr = cond.inputs[1].name
+                listKey.append(str(json_tuple[relation + "." + attr]))
+
+            key = ','.join(listKey)
+            yield (key, tuple)
+
+        ''' ...................... fill in your code above ........................'''
+        '''-----------------------------Join Task End-------------------------------'''
+
+    def reducer(self, key, values):
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+
+        ''' ...................... fill in your code below ........................'''
+        # the key already store 2 common key, so no need to find key here.
+        condition = raquery.cond
+
+        # take one of the key to be the identifier, it does not affect the corrcetness of the algo.
+        if not (isinstance(condition, radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[0], radb.ast.AttrRef)):
+            condition = condition.inputs[1]
+
+        list_of_values = list(values)
+        if (len(list_of_values)) > 1:
+            JoinClause1 = condition.inputs[0].rel + \
+                "." + condition.inputs[0].name
+            JoinClause2 = condition.inputs[1].rel + \
+                "." + condition.inputs[1].name
+            rowsFromTable1 = []
+            rowsFromTable2 = []
+            # divide lines into 2 list, by their origin table.
+            for jsonVal in list_of_values:
+                if (JoinClause1 in jsonVal):
+                    rowsFromTable1.append(jsonVal)
+                elif (JoinClause2 in jsonVal):
+                    rowsFromTable2.append(jsonVal)
+            # if matched rows = 0, do not process.
+            if len(rowsFromTable1) > 0 and len(rowsFromTable2) > 0:
+                for row2 in rowsFromTable2:
+                    rowsMergedTable = {}
+                    jsonRow = json.loads(row2)
+                    # add all entries from json 2 to merged json
+                    for rowkey in jsonRow:
+                        rowsMergedTable[rowkey] = jsonRow[rowkey]
+                    for row1 in rowsFromTable1:
+                        jsonRow = json.loads(row1)
+                        # add all entries from json 1 to merged json
+                        for rowkey in jsonRow:
+                            rowsMergedTable[rowkey] = jsonRow[rowkey]
+                        jsonString_merged = json.dumps(rowsMergedTable)
+                        yield (condition.inputs[0].rel + "_" + condition.inputs[1].rel, jsonString_merged)
+
+        ''' ...................... fill in your code above ........................'''
+
+
+class JoinLeftSelectTask(RelAlgQueryTask):
+    def requires(self):
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+        assert (isinstance(raquery, radb.ast.Join))
+        assert (isinstance(raquery.inputs[0], radb.ast.Select))
+        task1 = task_factory(
+            raquery.inputs[0].inputs[0], step=self.step + 1, env=self.exec_environment, optimize=self.optimize)
+        task2 = task_factory(raquery.inputs[1], step=self.step + count_steps(raquery.inputs[0]) + 1,
+                             env=self.exec_environment, optimize=self.optimize)
+
+        return [task1, task2]
+
+    def mapper(self, line):
+        '''-----------------------------Select Task Start-------------------------------'''
+        relation, tuple = line.split('\t')
+        json_tuple = json.loads(tuple)
+
+        condition = radb.parse.one_statement_from_string(
+            self.querystring).inputs[1].cond
+        resultList = []
+        leftTblName = radb.parse.one_statement_from_string(
+            self.querystring).cond.inputs[0].rel
+        # rightTblName = radb.parse.one_statement_from_string(
+        #    self.querystring).cond.inputs[1].rel
+        ''' ...................... fill in your code below ........................'''
+        attr = ""
+        value = ""
+        # multiple select clause
+        if (relation == leftTblName):
+            if isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
+
+                selectObj = condition.inputs
+                selectList = []
+                while (isinstance(selectObj[0], radb.ast.ValExprBinaryOp)):
+                    selectList.append(selectObj[1])
+                    selectObj = selectObj[0].inputs
+
+                selectList.append(radb.ast.ValExprBinaryOp(
+                    selectObj[0], radb.parse.RAParser.EQ, selectObj[1]))
+                allValid = True
+                if selectList:
+                    while selectList:
+                        condition = selectList.pop()
+                        if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                            attr = condition.inputs[0].name
+                            value = condition.inputs[1]
+                        else:
+                            attr = condition.inputs[1].name
+                            value = condition.inputs[0]
+                        if isinstance(value, radb.ast.RAString):
+                            value = str(value).strip('\'')
+                        else:
+                            value = int(value.val)
+                        if json_tuple[relation + "." + attr] != value:
+                            allValid = False
+                            break
+                    if allValid == True:
+                        # yield (relation, tuple)
+                        resultList.append((relation, tuple))
+        # only 1 select clause.
+            else:
+                if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                    attr = condition.inputs[0].name
+                    value = condition.inputs[1]
+                else:
+                    attr = condition.inputs[1].name
+                    value = condition.inputs[0]
+                if isinstance(value, radb.ast.RAString):
+                    value = str(value).strip('\'')
+                else:
+                    value = int(value.val)
+                if json_tuple[relation + "." + attr] == value:
+                    # yield (relation, tuple)
+                    resultList.append((relation, tuple))
+        else:
+            resultList.append((relation, tuple))
+
+        ''' ...................... fill in your code above ........................'''
+
+        '''-----------------------------Select Task End-------------------------------'''
+        '''-----------------------------Join Task Start-------------------------------'''
+        for result in resultList:
+            relation, tuple = result
+            json_tuple = json.loads(tuple)
+
+            raquery = radb.parse.one_statement_from_string(self.querystring)
+            condition = raquery.cond
+
+            ''' ...................... fill in your code below ........................'''
+
+            listCondition = []
+            # add itself to list if only 1 equal condition
+            if (isinstance(condition, radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[0], radb.ast.AttrRef)):
+                listCondition.append(condition)
+            else:
+                # add whole list of >1 equal condition.
+                for cond in condition.inputs:
+                    listCondition.append(cond)
+
+            attr = ""
+            listKey = []
+            for cond in listCondition:
+                # join keys only exist in one of the table, determine this row is in tableA or tableB
+                if cond.inputs[0].rel == relation or cond.inputs[0].rel in relation:
+                    relation = cond.inputs[0].rel
+                    attr = cond.inputs[0].name
+                elif cond.inputs[1].rel == relation or cond.inputs[1].rel in relation:
+                    relation = cond.inputs[1].rel
+                    attr = cond.inputs[1].name
+                listKey.append(str(json_tuple[relation + "." + attr]))
+
+            key = ','.join(listKey)
+            yield (key, tuple)
+
+        ''' ...................... fill in your code above ........................'''
+        '''-----------------------------Join Task End-------------------------------'''
+
+    def reducer(self, key, values):
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+
+        ''' ...................... fill in your code below ........................'''
+        # the key already store 2 common key, so no need to find key here.
+        condition = raquery.cond
+
+        # take one of the key to be the identifier, it does not affect the corrcetness of the algo.
+        if not (isinstance(condition, radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[0], radb.ast.AttrRef)):
+            condition = condition.inputs[1]
+
+        list_of_values = list(values)
+        if (len(list_of_values)) > 1:
+            JoinClause1 = condition.inputs[0].rel + \
+                "." + condition.inputs[0].name
+            JoinClause2 = condition.inputs[1].rel + \
+                "." + condition.inputs[1].name
+            rowsFromTable1 = []
+            rowsFromTable2 = []
+            # divide lines into 2 list, by their origin table.
+            for jsonVal in list_of_values:
+                if (JoinClause1 in jsonVal):
+                    rowsFromTable1.append(jsonVal)
+                elif (JoinClause2 in jsonVal):
+                    rowsFromTable2.append(jsonVal)
+            # if matched rows = 0, do not process.
+            if len(rowsFromTable1) > 0 and len(rowsFromTable2) > 0:
+                for row2 in rowsFromTable2:
+                    rowsMergedTable = {}
+                    jsonRow = json.loads(row2)
+                    # add all entries from json 2 to merged json
+                    for rowkey in jsonRow:
+                        rowsMergedTable[rowkey] = jsonRow[rowkey]
+                    for row1 in rowsFromTable1:
+                        jsonRow = json.loads(row1)
+                        # add all entries from json 1 to merged json
+                        for rowkey in jsonRow:
+                            rowsMergedTable[rowkey] = jsonRow[rowkey]
+                        jsonString_merged = json.dumps(rowsMergedTable)
+                        yield (condition.inputs[0].rel + "_" + condition.inputs[1].rel, jsonString_merged)
+
+        ''' ...................... fill in your code above ........................'''
+
+
+class JoinBothSelectTask(RelAlgQueryTask):
+    def requires(self):
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+        assert (isinstance(raquery, radb.ast.Join))
+        assert (isinstance(raquery.inputs[1], radb.ast.Select))
+        assert (isinstance(raquery.inputs[0], radb.ast.Select))
+        task1 = task_factory(
+            raquery.inputs[0].inputs[0], step=self.step + 1, env=self.exec_environment, optimize=self.optimize)
+        task2 = task_factory(raquery.inputs[1].inputs[0], step=self.step + count_steps(raquery.inputs[0]) + 1,
+                             env=self.exec_environment, optimize=self.optimize)
+
+        return [task1, task2]
+
+    def mapper(self, line):
+        '''-----------------------------Select Task Start-------------------------------'''
+        relation, tuple = line.split('\t')
+        json_tuple = json.loads(tuple)
+
+        condition = radb.parse.one_statement_from_string(
+            self.querystring).inputs[1].cond
+        resultList = []
+        leftTblName = radb.parse.one_statement_from_string(
+            self.querystring).cond.inputs[0].rel
+        rightTblName = radb.parse.one_statement_from_string(
+            self.querystring).cond.inputs[1].rel
+        ''' ...................... fill in your code below ........................'''
+        attr = ""
+        value = ""
+        # multiple select clause
+        if (relation == rightTblName):
+            if isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
+
+                selectObj = condition.inputs
+                selectList = []
+                while (isinstance(selectObj[0], radb.ast.ValExprBinaryOp)):
+                    selectList.append(selectObj[1])
+                    selectObj = selectObj[0].inputs
+
+                selectList.append(radb.ast.ValExprBinaryOp(
+                    selectObj[0], radb.parse.RAParser.EQ, selectObj[1]))
+                allValid = True
+                if selectList:
+                    while selectList:
+                        condition = selectList.pop()
+                        if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                            attr = condition.inputs[0].name
+                            value = condition.inputs[1]
+                        else:
+                            attr = condition.inputs[1].name
+                            value = condition.inputs[0]
+                        if isinstance(value, radb.ast.RAString):
+                            value = str(value).strip('\'')
+                        else:
+                            value = int(value.val)
+                        if json_tuple[relation + "." + attr] != value:
+                            allValid = False
+                            break
+                    if allValid == True:
+                        # yield (relation, tuple)
+                        resultList.append((relation, tuple))
+        # only 1 select clause.
+            else:
+                if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                    attr = condition.inputs[0].name
+                    value = condition.inputs[1]
+                else:
+                    attr = condition.inputs[1].name
+                    value = condition.inputs[0]
+                if isinstance(value, radb.ast.RAString):
+                    value = str(value).strip('\'')
+                else:
+                    value = int(value.val)
+                if json_tuple[relation + "." + attr] == value:
+                    # yield (relation, tuple)
+                    resultList.append((relation, tuple))
+        elif (relation == leftTblName):
+            if isinstance(condition.inputs[0], radb.ast.ValExprBinaryOp):
+                selectObj = condition.inputs
+                selectList = []
+                while (isinstance(selectObj[0], radb.ast.ValExprBinaryOp)):
+                    selectList.append(selectObj[1])
+                    selectObj = selectObj[0].inputs
+
+                selectList.append(radb.ast.ValExprBinaryOp(
+                    selectObj[0], radb.parse.RAParser.EQ, selectObj[1]))
+                allValid = True
+                if selectList:
+                    while selectList:
+                        condition = selectList.pop()
+                        if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                            attr = condition.inputs[0].name
+                            value = condition.inputs[1]
+                        else:
+                            attr = condition.inputs[1].name
+                            value = condition.inputs[0]
+                        if isinstance(value, radb.ast.RAString):
+                            value = str(value).strip('\'')
+                        else:
+                            value = int(value.val)
+                        if json_tuple[relation + "." + attr] != value:
+                            allValid = False
+                            break
+                    if allValid == True:
+                        # yield (relation, tuple)
+                        resultList.append((relation, tuple))
+        # only 1 select clause.
+            else:
+                if isinstance(condition.inputs[0], radb.ast.AttrRef):
+                    attr = condition.inputs[0].name
+                    value = condition.inputs[1]
+                else:
+                    attr = condition.inputs[1].name
+                    value = condition.inputs[0]
+                if isinstance(value, radb.ast.RAString):
+                    value = str(value).strip('\'')
+                else:
+                    value = int(value.val)
+                if json_tuple[relation + "." + attr] == value:
+                    # yield (relation, tuple)
+                    resultList.append((relation, tuple))
+
+        ''' ...................... fill in your code above ........................'''
+
+        '''-----------------------------Select Task End-------------------------------'''
+        '''-----------------------------Join Task Start-------------------------------'''
+        for result in resultList:
+            relation, tuple = result
+            json_tuple = json.loads(tuple)
+
+            raquery = radb.parse.one_statement_from_string(self.querystring)
+            condition = raquery.cond
+
+            ''' ...................... fill in your code below ........................'''
+
+            listCondition = []
+            # add itself to list if only 1 equal condition
+            if (isinstance(condition, radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[0], radb.ast.AttrRef)):
+                listCondition.append(condition)
+            else:
+                # add whole list of >1 equal condition.
+                for cond in condition.inputs:
+                    listCondition.append(cond)
+
+            attr = ""
+            listKey = []
+            for cond in listCondition:
+                # join keys only exist in one of the table, determine this row is in tableA or tableB
+                if cond.inputs[0].rel == relation or cond.inputs[0].rel in relation:
+                    relation = cond.inputs[0].rel
+                    attr = cond.inputs[0].name
+                elif cond.inputs[1].rel == relation or cond.inputs[1].rel in relation:
+                    relation = cond.inputs[1].rel
+                    attr = cond.inputs[1].name
+                listKey.append(str(json_tuple[relation + "." + attr]))
+
+            key = ','.join(listKey)
+            yield (key, tuple)
+
+        ''' ...................... fill in your code above ........................'''
+        '''-----------------------------Join Task End-------------------------------'''
+
+    def reducer(self, key, values):
+        raquery = radb.parse.one_statement_from_string(self.querystring)
+
+        ''' ...................... fill in your code below ........................'''
+        # the key already store 2 common key, so no need to find key here.
+        condition = raquery.cond
+
+        # take one of the key to be the identifier, it does not affect the corrcetness of the algo.
+        if not (isinstance(condition, radb.ast.ValExprBinaryOp) and isinstance(condition.inputs[0], radb.ast.AttrRef)):
+            condition = condition.inputs[1]
+
+        list_of_values = list(values)
+        if (len(list_of_values)) > 1:
+            JoinClause1 = condition.inputs[0].rel + \
+                "." + condition.inputs[0].name
+            JoinClause2 = condition.inputs[1].rel + \
+                "." + condition.inputs[1].name
+            rowsFromTable1 = []
+            rowsFromTable2 = []
+            # divide lines into 2 list, by their origin table.
+            for jsonVal in list_of_values:
+                if (JoinClause1 in jsonVal):
+                    rowsFromTable1.append(jsonVal)
+                elif (JoinClause2 in jsonVal):
+                    rowsFromTable2.append(jsonVal)
+            # if matched rows = 0, do not process.
+            if len(rowsFromTable1) > 0 and len(rowsFromTable2) > 0:
+                for row2 in rowsFromTable2:
+                    rowsMergedTable = {}
+                    jsonRow = json.loads(row2)
+                    # add all entries from json 2 to merged json
+                    for rowkey in jsonRow:
+                        rowsMergedTable[rowkey] = jsonRow[rowkey]
+                    for row1 in rowsFromTable1:
+                        jsonRow = json.loads(row1)
+                        # add all entries from json 1 to merged json
+                        for rowkey in jsonRow:
+                            rowsMergedTable[rowkey] = jsonRow[rowkey]
+                        jsonString_merged = json.dumps(rowsMergedTable)
+                        yield (condition.inputs[0].rel + "_" + condition.inputs[1].rel, jsonString_merged)
 
         ''' ...................... fill in your code above ........................'''
 

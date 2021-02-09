@@ -37,8 +37,18 @@ def translate(stmt):
         isStar = False
         att = []
         selectFullString = tokens[idxDistinct+2].value
-        projectAtt = [radb.ast.AttrRef(None, x.strip())
-                      for x in selectFullString.split(',')]
+        # projectAtt = [radb.ast.AttrRef(None, x.strip())
+        #              for x in selectFullString.split(',')]
+        # fixed in ms4, to parse projectAtt better by dot.
+        projectAtt = []
+        for x in selectFullString.split(','):
+            if x.strip().find('.') != -1:
+                tableName = x.strip().split('.')[0]
+                attrName = x.strip().split('.')[1]
+            else:
+                tableName = None
+                attrName = x.strip()
+            projectAtt.append(radb.ast.AttrRef(tableName, attrName))
 
     # 2. check 1 or more table. (not handle rename yet)
     tableFullString = tokens[idxFrom+2].value
