@@ -191,10 +191,42 @@ def rule_merge_selections(ra2):
         return ra2
 
 
+# def rule_sweep_cross(ra3, dd, tableSize=0):
+#     if isinstance(ra3, radb.ast.Select):
+#         result = rule_sweep_cross(ra3.inputs[0], dd, tableSize)
+#         return ra3
+#     elif isinstance(ra3, radb.ast.Project):
+#         result = rule_sweep_cross(ra3.inputs[0], dd, tableSize)
+#         return result
+#     elif isinstance(ra3, radb.ast.Cross):
+#         firstCrossObj = ra3.inputs[0]
+#         secondCrossObj = ra3.inputs[1]
+#         firstCrossResult, tableSize1 = rule_sweep_cross(
+#             firstCrossObj, dd, tableSize)
+#         secondCrossResult, tableSize2 = rule_sweep_cross(
+#             secondCrossObj, dd, tableSize)
+#         result = radb.ast.Cross(firstCrossResult, secondCrossResult)
+#         tableSize = tableSize1*tableSize2
+#         return (result, tableSize)
+#     elif isinstance(ra3, radb.ast.RelRef):
+#         tableSize = 0
+#         for i in dd.keys():
+#             if (i == ra3.rel):
+#                 tableSize = dd[i]
+#         return (ra3, tableSize)
+#     elif isinstance(ra3, radb.ast.Rename):
+#         tableSize = 0
+#         for i in dd.keys():
+#             if (i == ra3.inputs[0].rel):
+#                 tableSize = dd[i]
+#         return (ra3, tableSize)
+
+
 def rule_introduce_joins(ra3):
     if isinstance(ra3, radb.ast.Select) and isinstance(ra3.inputs[0], radb.ast.Cross):
         BinaryOp = ra3.cond
         result = None
+        # in cross, RHS is always a ref.
         if isinstance(ra3.inputs[0].inputs[0], radb.ast.Select):
             leftTable = rule_introduce_joins(ra3.inputs[0].inputs[0])
             rightTable = ra3.inputs[0].inputs[1]
@@ -241,13 +273,34 @@ def find_all_join_Instance(ra):
     return result
 
 
-def rule_push_down_projections(ra4, dd, projectClauses=None):
+def find_all_project_Instance(ra):
+    result = []
+    if isinstance(ra, radb.ast.Select):
+        result = find_all_project_Instance(ra.inputs[0])
+    elif isinstance(ra, radb.ast.Project):
+        result.append(ra)
+        result = result + find_all_project_Instance(ra.inputs[0])
+    elif isinstance(ra, radb.ast.Join):
+        result = result + find_all_project_Instance(
+            ra.inputs[0]) + find_all_project_Instance(ra.inputs[1])
+    elif isinstance(ra, radb.ast.RelRef):
+        return result
+    elif isinstance(ra, radb.ast.Rename):
+        return result
+    return result
+
+
+def rule_push_down_projections(ra4, dd, projectClauses=None, optimize=False):
     allJoin = []
+    allProject = []
+    if optimize == False:
+        return ra4
     # all selections have been put done.
     if projectClauses is None:
         allJoin = find_all_join_Instance(ra4)
+        allProject = find_all_project_Instance(ra4)
 
-    if (len(allJoin) > 0 or projectClauses is not None):
+    if ((len(allJoin) > 0 and len(allProject) > 0) or projectClauses is not None):
         if isinstance(ra4, radb.ast.RelRef) or isinstance(ra4, radb.ast.Rename) or (isinstance(ra4, radb.ast.Select) and isinstance(ra4.inputs[0], radb.ast.RelRef)) \
                 or (isinstance(ra4, radb.ast.Select) and isinstance(ra4.inputs[0], radb.ast.Rename)):
             # append projectClause needed to check if it match the table.
@@ -255,16 +308,21 @@ def rule_push_down_projections(ra4, dd, projectClauses=None):
                 transformedProjectClauses = []
                 if isinstance(ra4, radb.ast.RelRef):
                     transformedProjectClauses = [
-                        radb.ast.AttrRef(attr[0], attr[1]) for attr in projectClauses if attr[0] == ra4.rel]  # get real table name
+                        (attr[0], attr[1]) for attr in projectClauses if attr[0] == ra4.rel]  # get real table name
                 elif isinstance(ra4, radb.ast.Rename):
                     transformedProjectClauses = [
-                        radb.ast.AttrRef(attr[0], attr[1]) for attr in projectClauses if attr[0] == ra4.relname]  # get renamed table name
+                        (attr[0], attr[1]) for attr in projectClauses if attr[0] == ra4.relname]  # get renamed table name
                 elif (isinstance(ra4, radb.ast.Select) and isinstance(ra4.inputs[0], radb.ast.RelRef)):
                     transformedProjectClauses = [
-                        radb.ast.AttrRef(attr[0], attr[1]) for attr in projectClauses if attr[0] == ra4.inputs[0].rel]  # get real table name
+                        (attr[0], attr[1]) for attr in projectClauses if attr[0] == ra4.inputs[0].rel]  # get real table name
                 elif (isinstance(ra4, radb.ast.Select) and isinstance(ra4.inputs[0], radb.ast.Rename)):
                     transformedProjectClauses = [
-                        radb.ast.AttrRef(attr[0], attr[1]) for attr in projectClauses if attr[0] == ra4.inputs[0].relname]  # get renamed table name
+                        (attr[0], attr[1]) for attr in projectClauses if attr[0] == ra4.inputs[0].relname]  # get renamed table name
+                # deduplicate
+                transformedProjectClauses = list(
+                    set(transformedProjectClauses))
+                transformedProjectClauses = [radb.ast.AttrRef(
+                    attr[0], attr[1]) for attr in transformedProjectClauses]
                 result = radb.ast.Project(transformedProjectClauses, ra4)
                 return result
             else:
@@ -276,10 +334,16 @@ def rule_push_down_projections(ra4, dd, projectClauses=None):
                 projectClauses = set()
             # put all project Clause into 1 list
             for attr in ra4.attrs:
-                projectClauses.add((attr.rel, attr.name))
+                projectClauses.add((attr.rel, attr.name, "Project"))
             # bring project caluse to next layer.
             result = rule_push_down_projections(
                 ra4.inputs[0], dd, projectClauses)
+
+            # add project clause back on top if they are from project clause, not from join clause.
+            transformedProjectClauses = [
+                radb.ast.AttrRef(attr[0], attr[1]) for attr in projectClauses if attr[2] == "Project"]  # get real table name
+            if len(transformedProjectClauses) > 0:
+                result = radb.ast.Project(transformedProjectClauses, result)
             return result
         elif isinstance(ra4, radb.ast.Join):
             # take condition
@@ -290,9 +354,9 @@ def rule_push_down_projections(ra4, dd, projectClauses=None):
             # add condition to projectClauses
             # assume that only 1 clause exists.
             projectClauses.add(
-                (BinaryOp.inputs[0].rel, BinaryOp.inputs[0].name))
+                (BinaryOp.inputs[0].rel, BinaryOp.inputs[0].name, "Join"))
             projectClauses.add(
-                (BinaryOp.inputs[1].rel, BinaryOp.inputs[1].name))
+                (BinaryOp.inputs[1].rel, BinaryOp.inputs[1].name, "Join"))
             # call recursion.
             return radb.ast.Join(rule_push_down_projections(ra4.inputs[0], dd, projectClauses), BinaryOp, rule_push_down_projections(ra4.inputs[1], dd, projectClauses))
 

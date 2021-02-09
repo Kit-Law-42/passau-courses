@@ -781,8 +781,11 @@ class JoinLeftSelectTask(RelAlgQueryTask):
         json_tuple = json.loads(tuple)
 
         condition = radb.parse.one_statement_from_string(
-            self.querystring).inputs[1].cond
+            self.querystring).inputs[0].cond
         resultList = []
+
+        # do not make an assumption than "order \join{ order.key = customer.key} customer".
+        # It might be the opposite! order \join{  customer.key = order.key} customer
         leftTblName = radb.parse.one_statement_from_string(
             self.querystring).cond.inputs[0].rel
         # rightTblName = radb.parse.one_statement_from_string(

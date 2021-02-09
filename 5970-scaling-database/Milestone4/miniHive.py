@@ -49,15 +49,23 @@ def eval(sf, env, query, optimize):
                       "PS_SUPPLYCOST": "float", "PS_COMMENT": "string"}
 
     ''' ...................... you may edit code below ........................'''
-
+    ds = {}
+    ds["REGION"] = 5
+    ds["NATION"] = 25
+    ds["PART"] = sf*200000
+    ds["SUPPLIER"] = sf*10000
+    ds["PARTSUPP"] = sf*800000
+    ds["CUSTOMER"] = sf*150000
+    ds["LINEITEM"] = sf*6000000
+    ds["ORDERS"] = sf*1500000
     stmt = sqlparse.parse(query)[0]
-    ra0 = sql2ra.translate(stmt)
+    ra0 = sql2ra.translate(stmt, ds, optimize=optimize)
 
     ra1 = raopt.rule_break_up_selections(ra0)
     ra2 = raopt.rule_push_down_selections(ra1, dd)
     ra3 = raopt.rule_merge_selections(ra2)
     ra4 = raopt.rule_introduce_joins(ra3)
-    ra5 = raopt.rule_push_down_projections(ra4, dd)
+    ra5 = raopt.rule_push_down_projections(ra4, dd, optimize=optimize)
     task = ra2mr.task_factory(ra5, env=env, optimize=optimize)
 
     luigi.build([task], local_scheduler=True)

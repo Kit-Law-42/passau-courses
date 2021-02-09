@@ -27,8 +27,14 @@ class End2EndUnitTests(unittest.TestCase):
                         "pizza": "string", "price": "integer"}
         dd["Frequents"] = {"name": "string", "pizzeria": "string"}
 
+        ds = {}
+        ds["Person"] = 9
+        ds["Eats"] = 20
+        ds["Serves"] = 30
+        ds["Frequents"] = 35
+        optimize = True
         stmt = sqlparse.parse(sqlstring)[0]
-        ra0 = sql2ra.translate(stmt)
+        ra0 = sql2ra.translate(stmt, ds, optimize=optimize)
 
         ra1 = raopt.rule_break_up_selections(ra0)
         ra2 = raopt.rule_push_down_selections(ra1, dd)
@@ -36,9 +42,10 @@ class End2EndUnitTests(unittest.TestCase):
         ra3 = raopt.rule_merge_selections(ra2)
         ra4 = raopt.rule_introduce_joins(ra3)
 
-        task = ra2mr.task_factory(ra4, env=ra2mr.ExecEnv.MOCK)
-        #ra5 = raopt.rule_push_down_projections(ra4, dd)
-        #task = ra2mr.task_factory(ra5, env=ra2mr.ExecEnv.MOCK, optimize=True)
+        # task = ra2mr.task_factory(ra4, env=ra2mr.ExecEnv.MOCK)
+        ra5 = raopt.rule_push_down_projections(ra4, dd, optimize=optimize)
+        task = ra2mr.task_factory(
+            ra5, env=ra2mr.ExecEnv.MOCK, optimize=optimize)
         luigi.build([task], local_scheduler=True)
 
         f = task.output().open('r')
