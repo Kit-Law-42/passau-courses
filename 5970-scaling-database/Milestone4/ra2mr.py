@@ -53,12 +53,12 @@ def count_steps(raquery):
     assert (isinstance(raquery, radb.ast.Node))
 
     if (isinstance(raquery, radb.ast.Project) and isinstance(raquery.inputs[0], radb.ast.Select) and isinstance(raquery.inputs[0].inputs[0], radb.ast.Select)):
-        return 1 + count_steps(raquery.inputs[0].inputs[0].inputs[0])
+        return 3 + count_steps(raquery.inputs[0].inputs[0].inputs[0])
 
     elif (isinstance(raquery, radb.ast.Project) and isinstance(raquery.inputs[0], radb.ast.Select)):
-        return 1 + count_steps(raquery.inputs[0].inputs[0])
+        return 2 + count_steps(raquery.inputs[0].inputs[0])
     elif (isinstance(raquery, radb.ast.Join) and isinstance(raquery.inputs[1], radb.ast.Select)) or (isinstance(raquery, radb.ast.Join) and isinstance(raquery.inputs[0], radb.ast.Select)):
-        return 1 + count_steps(raquery.inputs[0]) + count_steps(raquery.inputs[1])
+        return 2 + count_steps(raquery.inputs[0]) + count_steps(raquery.inputs[1])
     elif (isinstance(raquery, radb.ast.Select) or isinstance(raquery, radb.ast.Project) or
             isinstance(raquery, radb.ast.Rename)):
         return 1 + count_steps(raquery.inputs[0])
