@@ -28,4 +28,4 @@ We are planning to use address two questions in this project:
 - **GAN Selection**: Which GAN architecture is well suited for re-alistic medical image generation, especially for MRI images?
 - **CNN Image classifier**: Can synthetic images of MRI scan im-prove accuracy of Medical Image classifier?
 
-This project is still on-going.
+This project is finished and dis-continued on Mar 2021.
