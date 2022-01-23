@@ -7,3 +7,6 @@ class Solution:
             res += (num//v) * numerals[i]
             num %= v
         return res
+
+solution = Solution()
+print(solution.intToRoman(4900))
