@@ -1,4 +1,4 @@
-                #Solution 1
+        #Solution 1
         #digits_str=str(digits)[1:-1]
         # digits_str = ''.join([str(i) for i in digits])
         # res = int(digits_str)+1
